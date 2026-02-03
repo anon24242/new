@@ -11,7 +11,7 @@ import csv
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Iterable, List, Tuple
 
 import cv2
 import face_recognition
@@ -22,6 +22,7 @@ class MatchResult:
     image_path: Path
     student_name: str
     distance: float
+    location: Tuple[int, int, int, int]
 
 
 def iter_image_paths(folder: Path) -> Iterable[Path]:
@@ -61,10 +62,13 @@ def match_faces(
 ) -> List[MatchResult]:
     image = face_recognition.load_image_file(target_image)
     face_locations = face_recognition.face_locations(image)
+    if not face_locations:
+        logging.debug("No faces detected in %s", target_image)
+        return []
     face_encodings = face_recognition.face_encodings(image, face_locations)
 
     matches: List[MatchResult] = []
-    for face_encoding in face_encodings:
+    for location, face_encoding in zip(face_locations, face_encodings):
         distances = face_recognition.face_distance(known_encodings, face_encoding)
         if len(distances) == 0:
             continue
@@ -76,8 +80,10 @@ def match_faces(
                     image_path=target_image,
                     student_name=known_names[best_index],
                     distance=best_distance,
+                    location=location,
                 )
             )
+    matches.sort(key=lambda match: match.distance)
     return matches
 
 
@@ -87,10 +93,8 @@ def annotate_image(image_path: Path, matches: List[MatchResult], output_dir: Pat
         logging.warning("Could not read image %s", image_path)
         return
 
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_image)
-
-    for (top, right, bottom, left), match in zip(face_locations, matches):
+    for match in matches:
+        top, right, bottom, left = match.location
         cv2.rectangle(image, (left, top), (right, bottom), (0, 255, 0), 2)
         label = f"{match.student_name} ({match.distance:.2f})"
         cv2.putText(
@@ -133,6 +137,9 @@ def main() -> None:
     known_names, known_encodings = load_known_students(args.known)
     if not known_names:
         raise SystemExit("No known student faces found. Check --known directory.")
+
+    if len(known_names) != len(known_encodings):
+        raise SystemExit("Mismatch between loaded names and encodings; check known images.")
 
     results: List[MatchResult] = []
     for image_path in iter_image_paths(args.unknown):

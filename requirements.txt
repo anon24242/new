@@ -1,4 +1,4 @@
-flask>=3.0
-httpx>=0.27
-pycryptodome>=3.20
+flask
+httpx
+pycryptodome
 gunicorn
